@@ -1,0 +1,19 @@
+[project]
+name = "ViT-TensorRT"
+version = "0.1.0"
+description = "A re-implementation of ViT containing utilities to convert to TensorRT engines and run in Triton."
+authors = [
+    {name = "KyleNewman97", email = "kyle@thenewmans.com.au"},
+]
+dependencies = []
+requires-python = ">=3.11"
+readme = "README.md"
+license = {text = "MIT"}
+
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
+
+
+[tool.pdm]
+distribution = true
