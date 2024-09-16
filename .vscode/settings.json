@@ -2,5 +2,12 @@
     "python.defaultInterpreterPath": ".venv/bin/python",
     "editor.defaultFormatter": "ms-python.black-formatter",
     "editor.formatOnSave": true,
-    "editor.rulers": [88]
+    "editor.rulers": [
+        88
+    ],
+    "python.testing.pytestArgs": [
+        "tests"
+    ],
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true
 }
