@@ -1,4 +1,5 @@
 from collections import OrderedDict
+from pathlib import Path
 
 import torch
 from torch.nn import (
@@ -109,6 +110,11 @@ class ViT(Module, MetaLogger):
 
         # Pass the embedding through the head to perform classification
         return self.head(out_class_embedding)
+
+    def fit(self, data_path: Path, epochs: int = 100, batch_size: int = 16):
+        # Set the model to training mode such that Modules like Dropout and BatchNorm
+        # behave appropriately during training
+        self.train()
 
 
 class Encoder(Module, MetaLogger):
@@ -275,12 +281,15 @@ class MLPBlock(Sequential):
 
 
 if __name__ == "__main__":
-    # instantiate the model
+    import torchvision
+
+    # Instantiate the model
     model = ViT(ViTConfig())
 
-    # construct input tensor
-    input_tensor = torch.rand((1, 3, model.config.image_size, model.config.image_size))
+    # Load in a dataset
+    cifar100_data = torchvision.datasets.CIFAR100(
+        "/mnt/data/documents/code/ml-projects/ViT-TensorRT/datasets/cifar100"
+    )
+    data_loader = torch.utils.data.DataLoader(cifar100_data, batch_size=16)
 
-    output = model.forward(input_tensor)
-
-    print(output.shape)
+    print(data_loader)

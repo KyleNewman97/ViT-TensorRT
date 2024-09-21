@@ -2,6 +2,7 @@ import torch
 from unittest.mock import MagicMock, patch
 
 from vit_tensorrt import ViT
+from vit_tensorrt.vit_config import ViTConfig
 
 
 class TestViT:
@@ -15,7 +16,7 @@ class TestViT:
         torch.set_default_device = MagicMock()
 
         device = "cuda:0"
-        ViT(16, device)
+        ViT(ViTConfig(), device)
 
         torch.set_default_device.assert_called_once_with(device)
 
@@ -28,7 +29,7 @@ class TestViT:
         # mock the call to set the device
         torch.set_default_device = MagicMock()
 
-        ViT(16, "cuda:0")
+        ViT(ViTConfig(), "cuda:0")
 
         torch.set_default_device.assert_called_once_with("cpu")
 
@@ -40,6 +41,6 @@ class TestViT:
         torch.set_default_device = MagicMock()
 
         device = "cpu"
-        ViT(16, device)
+        ViT(ViTConfig(), device)
 
         torch.set_default_device.assert_called_once_with(device)
