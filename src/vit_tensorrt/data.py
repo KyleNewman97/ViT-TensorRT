@@ -128,6 +128,9 @@ class ViTDataset(Dataset, MetaLogger):
         self.image_height = image_height
         self.image_width = image_width
 
+        self.logger.info(f"Images path: {images_path}")
+        self.logger.info(f"Labels path: {labels_path}")
+
         images = list(images_path.glob("*.jpg")) + list(images_path.glob("*.png"))
         labels = list(labels_path.glob("*.txt"))
 

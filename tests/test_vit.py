@@ -2,7 +2,7 @@ import torch
 from unittest.mock import MagicMock, patch
 
 from vit_tensorrt import ViT
-from vit_tensorrt.vit_config import ViTConfig
+from vit_tensorrt.config import ViTConfig
 
 
 class TestViT:

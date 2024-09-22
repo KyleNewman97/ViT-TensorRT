@@ -1,9 +1,10 @@
 from collections import OrderedDict
-from pathlib import Path
 
 import torch
 from torch.nn import (
+    BCELoss,
     Conv2d,
+    CrossEntropyLoss,
     Dropout,
     init,
     GELU,
@@ -14,9 +15,20 @@ from torch.nn import (
     Parameter,
     Sequential,
 )
+from torch.optim.adam import Adam
+from torch.utils.data import DataLoader
+from torch.amp import autocast, GradScaler
+from tqdm import tqdm
 
+from vit_tensorrt.data import ViTDataset
 from vit_tensorrt.utils import MetaLogger
-from vit_tensorrt.vit_config import AttentionConfig, EncoderConfig, MLPConfig, ViTConfig
+from vit_tensorrt.config import (
+    AttentionConfig,
+    EncoderConfig,
+    MLPConfig,
+    TrainConfig,
+    ViTConfig,
+)
 
 
 class ViT(Module, MetaLogger):
@@ -63,12 +75,13 @@ class ViT(Module, MetaLogger):
 
     def _set_compute_device(self, device: str):
         if "cuda" in device and torch.cuda.is_available():
-            torch.set_default_device(device)
+            self.device = device
         elif "cuda" in device and not torch.cuda.is_available():
             self.logger.warning("CUDA device not found - running on CPU.")
-            torch.set_default_device("cpu")
+            self.device = "cpu"
         else:
-            torch.set_default_device(device)
+            self.device = device
+        torch.set_default_device(self.device)
 
         self.logger.info(f"Set default device to {torch.get_default_device()}")
 
@@ -111,10 +124,103 @@ class ViT(Module, MetaLogger):
         # Pass the embedding through the head to perform classification
         return self.head(out_class_embedding)
 
-    def fit(self, data_path: Path, epochs: int = 100, batch_size: int = 16):
+    def _prepare_data(self, config: TrainConfig) -> tuple[DataLoader, DataLoader]:
+        # Create the training data loader
+        train_dataset = ViTDataset(
+            config.train_images_path,
+            config.train_labels_path,
+            self.config.num_classes,
+            self.config.image_size,
+            self.config.image_size,
+        )
+        train_loader = DataLoader(
+            train_dataset,
+            config.batch_size,
+            True,
+            generator=torch.Generator(device=self.device),
+        )
+        self.logger.info(f"Training with {len(train_dataset)} samples.")
+
+        # Create the validation data loader
+        valid_dataset = ViTDataset(
+            config.valid_images_path,
+            config.valid_labels_path,
+            self.config.num_classes,
+            self.config.image_size,
+            self.config.image_size,
+        )
+        valid_loader = DataLoader(
+            valid_dataset,
+            config.batch_size,
+            True,
+            generator=torch.Generator(device=self.device),
+        )
+        self.logger.info(f"Validating with {len(valid_dataset)} samples.")
+
+        return train_loader, valid_loader
+
+    def fit(self, config: TrainConfig):
         # Set the model to training mode such that Modules like Dropout and BatchNorm
         # behave appropriately during training
         self.train()
+
+        # Create datasets and loaders for train and valid
+        train_loader, valid_loader = self._prepare_data(config)
+
+        # Initialise loss and optimiser
+        loss_func = BCELoss() if self.config.num_classes == 1 else CrossEntropyLoss()
+        optimiser = Adam(self.parameters(), lr=config.learning_rate)
+
+        # Used for scaling gradients in fp16 layers where they may underflow precision
+        # limits
+        scaler = GradScaler(device=self.device)
+
+        loss = 0
+        self.logger.info(f"Training with config: {config}")
+        for epoch in range(config.epochs):
+            self.logger.info(f"Epoch: {epoch}")
+
+            model.train()
+            running_loss = 0
+            tqdm_iterator = tqdm(train_loader)
+            tqdm_iterator.set_description_str("Train")
+            for images, labels in tqdm_iterator:
+                # Zero the gradients - this is required on each mini-batch
+                optimiser.zero_grad()
+
+                # Use automatic mixed precision to reduce memory footprint
+                with autocast(device_type=self.device):
+                    # Make predictions for this batch and calculate the loss
+                    outputs: torch.Tensor = self(images)
+                    loss: torch.Tensor = loss_func(outputs, labels)
+
+                # Backprop
+                scaler.scale(loss).backward()
+                scaler.step(optimiser)
+                scaler.update()
+
+                tqdm_iterator.set_postfix_str(f"loss={loss.item():.4}")
+                running_loss += loss
+
+                break
+
+            # Run over the validation dataset
+            model.eval()
+            running_vloss = 0
+            with torch.no_grad():
+                tqdm_iterator = tqdm(valid_loader)
+                tqdm_iterator.set_description_str("Valid")
+                for images, labels in tqdm(valid_loader):
+                    outputs: torch.Tensor = self(images)
+                    loss = loss_func(outputs, labels)
+                    running_vloss += loss
+
+                    break
+
+            # Calculate metrcs
+            tloss = running_loss / len(train_loader)
+            vloss = running_vloss / len(valid_loader)
+            self.logger.info(f"Train loss: {tloss:.4} Valid loss: {vloss:.4}")
 
 
 class Encoder(Module, MetaLogger):
@@ -281,15 +387,13 @@ class MLPBlock(Sequential):
 
 
 if __name__ == "__main__":
-    import torchvision
+    from pathlib import Path
 
     # Instantiate the model
-    model = ViT(ViTConfig())
+    model = ViT(ViTConfig(num_classes=196))
 
     # Load in a dataset
-    cifar100_data = torchvision.datasets.CIFAR100(
-        "/mnt/data/documents/code/ml-projects/ViT-TensorRT/datasets/cifar100"
+    dataset_dir = Path(
+        "/mnt/data/documents/code/ml-projects/ViT-TensorRT/datasets/stanford_cars"
     )
-    data_loader = torch.utils.data.DataLoader(cifar100_data, batch_size=16)
-
-    print(data_loader)
+    model.fit(TrainConfig(data_path=dataset_dir, batch_size=8))

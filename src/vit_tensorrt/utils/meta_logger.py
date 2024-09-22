@@ -1,10 +1,11 @@
 import logging
 from datetime import datetime
+from uuid import uuid4
 
 
 class MetaLogger:
     def __init__(self):
-        self.logger = logging.getLogger("ViT-TensorRT")
+        self.logger = logging.getLogger(f"{uuid4()}")
         self.logger.setLevel(level=logging.INFO)
 
         # Add a formatter to prepend the class name to the message
