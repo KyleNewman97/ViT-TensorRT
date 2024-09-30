@@ -87,7 +87,7 @@ class ViTImageTransform(v2.Compose):
                 v2.RandomHorizontalFlip(p=0.5),
                 v2.ToDtype(torch.float32, True),
                 OptionalDivision(),
-                v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                # v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
             ],
         )
 
@@ -199,9 +199,14 @@ class ViTDataset(Dataset, MetaLogger):
         image = self.transform(image)
 
         # Load in the label
-        one_hot_class = torch.zeros((self.num_classes,))
         with open(label_file, "r") as fp:
             class_id = int(fp.read().strip())
-        one_hot_class[class_id] = 1
 
-        return image, one_hot_class
+        if 2 < self.num_classes:
+            label = torch.zeros((self.num_classes,))
+            label[class_id] = 1
+        else:
+            label = torch.zeros((1,))
+            label[0] = class_id
+
+        return image, label

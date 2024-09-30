@@ -1,4 +1,7 @@
+import os
+from datetime import datetime
 from pathlib import Path
+
 from pydantic import BaseModel, Field
 
 
@@ -23,7 +26,7 @@ class ViTConfig(BaseModel):
     image_size: int = Field(default=768)
     patch_size: int = Field(default=16)
     patch_embedding_size: int = Field(default=768)
-    num_classes: int = Field(default=1000)
+    num_classes: int = Field(default=1000, ge=2)
 
     encoder_config: EncoderConfig = Field(default_factory=EncoderConfig)
 
@@ -34,9 +37,18 @@ class TrainConfig(BaseModel):
     """
 
     data_path: Path
+    run_name: str = Field(
+        default_factory=lambda: datetime.now().strftime("%m-%d-%Y_%H-%M-%S")
+    )
     epochs: int = Field(default=100)
     batch_size: int = Field(default=16)
     learning_rate: float = Field(default=1e-3)
+
+    @property
+    def log_dir(self) -> Path:
+        log_dir = Path(os.getcwd()) / "runs" / self.run_name
+        log_dir.mkdir(exist_ok=True, parents=True)
+        return log_dir
 
     @property
     def train_path(self) -> Path:

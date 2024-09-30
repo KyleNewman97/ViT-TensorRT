@@ -1,8 +1,11 @@
 from collections import OrderedDict
+from pathlib import Path
 
 import torch
+import numpy as np
+from torch.amp import autocast, GradScaler
 from torch.nn import (
-    BCELoss,
+    BCEWithLogitsLoss,
     Conv2d,
     CrossEntropyLoss,
     Dropout,
@@ -15,9 +18,10 @@ from torch.nn import (
     Parameter,
     Sequential,
 )
+from torch.optim.lr_scheduler import ChainedScheduler, CosineAnnealingLR, LinearLR
 from torch.optim.adam import Adam
 from torch.utils.data import DataLoader
-from torch.amp import autocast, GradScaler
+from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 from vit_tensorrt.data import ViTDataset
@@ -34,7 +38,7 @@ from vit_tensorrt.config import (
 class ViT(Module, MetaLogger):
     def __init__(
         self,
-        config: ViTConfig,
+        config: ViTConfig = ViTConfig(),
         device: str = "cuda:0",
     ):
         Module.__init__(self)
@@ -71,7 +75,8 @@ class ViT(Module, MetaLogger):
         )
 
         # Initialise the "head" linear layer
-        self.head = Linear(config.patch_embedding_size, config.num_classes)
+        num_neurons = config.num_classes if config.num_classes > 2 else 1
+        self.head = Linear(config.patch_embedding_size, num_neurons)
 
     def _set_compute_device(self, device: str):
         if "cuda" in device and torch.cuda.is_available():
@@ -136,7 +141,7 @@ class ViT(Module, MetaLogger):
         train_loader = DataLoader(
             train_dataset,
             config.batch_size,
-            True,
+            shuffle=True,
             generator=torch.Generator(device=self.device),
         )
         self.logger.info(f"Training with {len(train_dataset)} samples.")
@@ -152,7 +157,7 @@ class ViT(Module, MetaLogger):
         valid_loader = DataLoader(
             valid_dataset,
             config.batch_size,
-            True,
+            shuffle=True,
             generator=torch.Generator(device=self.device),
         )
         self.logger.info(f"Validating with {len(valid_dataset)} samples.")
@@ -160,31 +165,41 @@ class ViT(Module, MetaLogger):
         return train_loader, valid_loader
 
     def fit(self, config: TrainConfig):
-        # Set the model to training mode such that Modules like Dropout and BatchNorm
-        # behave appropriately during training
-        self.train()
-
         # Create datasets and loaders for train and valid
         train_loader, valid_loader = self._prepare_data(config)
 
-        # Initialise loss and optimiser
-        loss_func = BCELoss() if self.config.num_classes == 1 else CrossEntropyLoss()
+        # Initialise loss, optimiser and learning rate scheduler
+        loss_func = (
+            BCEWithLogitsLoss() if self.config.num_classes == 2 else CrossEntropyLoss()
+        )
         optimiser = Adam(self.parameters(), lr=config.learning_rate)
+        scheduler = ChainedScheduler(
+            [
+                LinearLR(optimiser, total_iters=3),
+                CosineAnnealingLR(optimiser, T_max=config.epochs),
+            ],
+            optimiser,
+        )
 
         # Used for scaling gradients in fp16 layers where they may underflow precision
         # limits
         scaler = GradScaler(device=self.device)
 
+        writer = SummaryWriter(config.log_dir)
+
         loss = 0
+        best_v_loss = np.inf
+        running_loss_batches = 4
         self.logger.info(f"Training with config: {config}")
         for epoch in range(config.epochs):
             self.logger.info(f"Epoch: {epoch}")
 
-            model.train()
+            # Run the training epoch
+            self.train()
             running_loss = 0
-            tqdm_iterator = tqdm(train_loader)
+            tqdm_iterator = tqdm(train_loader, ncols=88)
             tqdm_iterator.set_description_str("Train")
-            for images, labels in tqdm_iterator:
+            for idx, (images, labels) in enumerate(tqdm_iterator):
                 # Zero the gradients - this is required on each mini-batch
                 optimiser.zero_grad()
 
@@ -200,27 +215,97 @@ class ViT(Module, MetaLogger):
                 scaler.update()
 
                 tqdm_iterator.set_postfix_str(f"loss={loss.item():.4}")
-                running_loss += loss
 
-                break
+                # Update the running loss only on the last `running_loss_batches` mini-
+                # batches
+                if len(train_loader) - running_loss_batches <= idx:
+                    running_loss += loss
+
+            # Update the learning rate scheduler
+            scheduler.step()
+
+            tqdm_iterator.close()
 
             # Run over the validation dataset
-            model.eval()
+            self.eval()
             running_vloss = 0
+            num_correct = 0
             with torch.no_grad():
-                tqdm_iterator = tqdm(valid_loader)
+                tqdm_iterator = tqdm(valid_loader, ncols=88)
                 tqdm_iterator.set_description_str("Valid")
-                for images, labels in tqdm(valid_loader):
+                for images, labels in tqdm_iterator:
                     outputs: torch.Tensor = self(images)
                     loss = loss_func(outputs, labels)
                     running_vloss += loss
 
-                    break
+                    # Calculate the number of correct classifications
+                    if 2 < self.config.num_classes:
+                        classifications = torch.nn.functional.softmax(outputs, dim=1)
+                        pred_classes = classifications.argmax(dim=1)
+                        true_classes: torch.Tensor = labels.argmax(dim=1)
+                        num_correct += (pred_classes == true_classes).sum()
+                    else:
+                        classifications = torch.nn.functional.sigmoid(outputs)
+                        pred_classes = 0.5 < classifications
+                        true_classes: torch.Tensor = labels == 1
+                        num_correct += (pred_classes == true_classes).sum()
+                tqdm_iterator.close()
 
             # Calculate metrcs
-            tloss = running_loss / len(train_loader)
-            vloss = running_vloss / len(valid_loader)
-            self.logger.info(f"Train loss: {tloss:.4} Valid loss: {vloss:.4}")
+            t_loss = (running_loss / running_loss_batches).item()
+            v_loss = (running_vloss / len(valid_loader)).item()
+            self.logger.info(f"Train loss: {t_loss:.4} Valid loss: {v_loss:.4}")
+            v_accuracy = num_correct / len(valid_loader.dataset)
+            self.logger.info(f"Valid accuracy: {v_accuracy.item()}")
+
+            # Log metrics to the summary writer
+            writer.add_scalar("Loss/train", t_loss, epoch)
+            writer.add_scalar("Loss/valid", v_loss, epoch)
+            writer.add_scalar("Acc/valid", v_accuracy, epoch)
+            writer.add_scalar("Optim/lr", scheduler.get_last_lr()[0], epoch)
+            writer.flush()
+
+            # Save the model
+            if v_loss < best_v_loss:
+                best_v_loss = v_loss
+                self.logger.info("Saving new best model.")
+                self.save(config.log_dir / "best.pt")
+            self.save(config.log_dir / "last.pt")
+
+        # Clean up at the end of training
+        writer.close()
+
+    def save(self, file: Path):
+        """
+        Saves the model to the specified location. By convention this location should
+        end with ".pt".
+        """
+
+        torch.save(
+            {
+                "model": self.state_dict(),
+                "config": self.config.model_dump(),
+                "device": self.device,
+            },
+            file,
+        )
+
+    @classmethod
+    def load(cls, file: Path) -> "ViT":
+        """
+        Load the model from the specified location.
+        """
+        # Load the previous state
+        model_state = torch.load(file, weights_only=True)
+        config = ViTConfig(**model_state["config"])
+        device = model_state["device"]
+
+        # Initialise the model
+        model = cls(config, device)
+        model.load_state_dict(model_state["model"])
+        model.eval()
+
+        return model
 
 
 class Encoder(Module, MetaLogger):
@@ -390,10 +475,15 @@ if __name__ == "__main__":
     from pathlib import Path
 
     # Instantiate the model
-    model = ViT(ViTConfig(num_classes=196))
+    encoder_config = EncoderConfig(num_layers=8)
+    config = ViTConfig(image_size=320, num_classes=2, encoder_config=encoder_config)
+    model = ViT(config, device="cuda:0")
 
-    # Load in a dataset
-    dataset_dir = Path(
-        "/mnt/data/documents/code/ml-projects/ViT-TensorRT/datasets/stanford_cars"
+    train_config = TrainConfig(
+        data_path=Path(
+            "/mnt/data/documents/code/ml-projects/ViT-TensorRT/datasets/cat-dog"
+        ),
+        batch_size=128,
+        learning_rate=1e-4,
     )
-    model.fit(TrainConfig(data_path=dataset_dir, batch_size=8))
+    model.fit(train_config)

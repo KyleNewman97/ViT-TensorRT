@@ -1,4 +1,6 @@
 import torch
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, patch
 
 from vit_tensorrt import ViT
@@ -44,3 +46,20 @@ class TestViT:
         ViT(ViTConfig(), device)
 
         torch.set_default_device.assert_called_once_with(device)
+
+    def test_save_and_load(self):
+        """
+        Test that we can save and load the model.
+        """
+
+        model = ViT(ViTConfig(), "cpu")
+
+        with TemporaryDirectory() as temp_dir:
+            model_file = Path(temp_dir) / "model.pt"
+            model.save(model_file)
+
+            loaded_model = ViT.load(model_file)
+
+        assert isinstance(loaded_model, ViT)
+        assert loaded_model.config == model.config
+        assert loaded_model.device == model.device
