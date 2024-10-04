@@ -4,63 +4,10 @@ import torch
 from PIL import Image
 from torch import Tensor
 from torch.utils.data import Dataset
-from torchvision.transforms import v2
 from torchvision.transforms.functional import pil_to_tensor
 
 from vit_tensorrt.utils import MetaLogger
-
-
-class OptionalDivision:
-    """
-    Divides the image's content by `255` if the max value in the image is greater than
-    1.
-    """
-
-    def __call__(self, image: Tensor) -> Tensor:
-        if 1 < image.max():
-            return image / 255
-        return image
-
-    def __repr__(self) -> str:
-        return f"{self.__class__.__name__}()"
-
-
-class ViTImageTransform(v2.Compose):
-    def __init__(self, height: int = 768, width: int = 768):
-        v2.Compose.__init__(
-            self,
-            [
-                v2.Resize((height, width)),
-                v2.ToDtype(torch.float32, True),
-                OptionalDivision(),
-                v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-            ],
-        )
-
-
-class ViTTrainImageTransform(v2.Compose):
-    def __init__(self, height: int = 768, width: int = 768):
-
-        # v2.RandomChoice(
-        #     [
-        #         v2.GaussianNoise(mean=0, sigma=5e-2),
-        #         v2.RandomInvert(p=0.5),
-        #         v2.RandomGrayscale(p=0.5),
-        #         v2.RandomCrop((height // 10, width // 10)),
-        #     ]
-        # ),
-        v2.Compose.__init__(
-            self,
-            [
-                v2.Resize((height, width)),
-                v2.RandomHorizontalFlip(p=0.5),
-                v2.RandomVerticalFlip(p=0.5),
-                v2.RandomRotation(90),
-                v2.ToDtype(torch.float32, True),
-                OptionalDivision(),
-                v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-            ],
-        )
+from vit_tensorrt.data.vit_train_image_transform import ViTTrainImageTransform
 
 
 class ViTDataset(Dataset, MetaLogger):

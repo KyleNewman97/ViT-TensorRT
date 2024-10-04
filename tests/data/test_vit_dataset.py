@@ -8,63 +8,7 @@ import numpy as np
 from PIL import Image
 from torch import Tensor
 
-from vit_tensorrt.data import (
-    OptionalDivision,
-    ViTDataset,
-    ViTTrainImageTransform,
-)
-
-
-class TestOptionalDivision:
-    @pytest.fixture
-    def division(self) -> OptionalDivision:
-        return OptionalDivision()
-
-    def test_init(self, division: OptionalDivision):
-        assert isinstance(division, OptionalDivision)
-
-    def test_divide(self, division: OptionalDivision):
-        """
-        Test that we divide the image when the max value is above 1.
-        """
-        image = torch.randint(0, 255, (3, 320, 320), dtype=torch.uint8)
-        result = division(image)
-
-        assert isinstance(result, Tensor)
-        assert 0 <= result.min()
-        assert result.max() <= 1
-
-    def test_skip_divide(self, division: OptionalDivision):
-        """
-        Test that we skip dividing the image when the max value is 1 or lower.
-        """
-        image = torch.ones((3, 320, 320), dtype=torch.uint8)
-        result = division(image)
-
-        assert isinstance(result, Tensor)
-        assert (result == 1).all()
-
-
-class TestViTTrainImageTransform:
-    def test_init(self):
-        transform = ViTTrainImageTransform(768, 768)
-        assert isinstance(transform, ViTTrainImageTransform)
-
-    def test_transform(self):
-        """
-        Tests that the transforms are applied correctly.
-        """
-        height, width = 768, 768
-        transform = ViTTrainImageTransform(height, width)
-
-        # Try to apply the transforms to an input image
-        image = torch.randint(0, 255, (3, 320, 320), dtype=torch.uint8)
-        result = transform(image)
-
-        assert isinstance(result, Tensor)
-        assert result.shape == (3, height, width)
-        assert result.dtype == torch.float32
-        assert result.max() < 100
+from vit_tensorrt.data import ViTDataset
 
 
 class TestViTDataset:
