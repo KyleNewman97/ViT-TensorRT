@@ -8,43 +8,11 @@ import numpy as np
 from PIL import Image
 from torch import Tensor
 
-from vit_tensorrt.data import Letterbox, OptionalDivision, ViTDataset, ViTImageTransform
-
-
-class TestLetterbox:
-    @pytest.fixture
-    def letterbox(self) -> Letterbox:
-        return Letterbox(768, 768)
-
-    def test_init(self, letterbox: Letterbox):
-        assert isinstance(letterbox, Letterbox)
-
-    def test_letterbox_height_limit(self, letterbox: Letterbox):
-        """
-        Test that we can letterbox the image when the height is the limit.
-        """
-
-        image = torch.randint(0, 255, (3, 640, 320))
-        out_image: torch.Tensor = letterbox(image)
-        assert out_image.shape == (3, letterbox.out_height, letterbox.out_width)
-
-    def test_letterbox_width_limit(self, letterbox: Letterbox):
-        """
-        Test that we can letterbox the image when the width is the limit.
-        """
-
-        image = torch.randint(0, 255, (3, 1080, 1920))
-        out_image: torch.Tensor = letterbox(image)
-        assert out_image.shape == (3, letterbox.out_height, letterbox.out_width)
-
-    def test_letterbox_size_equal(self, letterbox: Letterbox):
-        """
-        Test that we can letterbox the image when no padding should be added
-        """
-
-        image = torch.randint(0, 255, (3, 320, 320))
-        out_image: torch.Tensor = letterbox(image)
-        assert out_image.shape == (3, letterbox.out_height, letterbox.out_width)
+from vit_tensorrt.data import (
+    OptionalDivision,
+    ViTDataset,
+    ViTTrainImageTransform,
+)
 
 
 class TestOptionalDivision:
@@ -77,17 +45,17 @@ class TestOptionalDivision:
         assert (result == 1).all()
 
 
-class TestViTImageTransform:
+class TestViTTrainImageTransform:
     def test_init(self):
-        transform = ViTImageTransform(768, 768)
-        assert isinstance(transform, ViTImageTransform)
+        transform = ViTTrainImageTransform(768, 768)
+        assert isinstance(transform, ViTTrainImageTransform)
 
     def test_transform(self):
         """
         Tests that the transforms are applied correctly.
         """
         height, width = 768, 768
-        transform = ViTImageTransform(height, width)
+        transform = ViTTrainImageTransform(height, width)
 
         # Try to apply the transforms to an input image
         image = torch.randint(0, 255, (3, 320, 320), dtype=torch.uint8)
@@ -184,4 +152,4 @@ class TestViTDataset:
         assert isinstance(image, Tensor)
         assert image.shape == (3, dataset.image_height, dataset.image_width)
         assert isinstance(label, Tensor)
-        assert label.shape == (num_classes,)
+        assert label.shape == (1,)

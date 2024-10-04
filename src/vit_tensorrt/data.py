@@ -10,59 +10,6 @@ from torchvision.transforms.functional import pil_to_tensor
 from vit_tensorrt.utils import MetaLogger
 
 
-class Letterbox:
-    """
-    A PyTorch transform to letterbox an image to the specified `width` and `height`.
-    Specifically, this scales the image to fit into the desired output size whilst
-    maintaining the image's original aspect ratio. The scaled image is then centered
-    leaving gray padding in the other regions.
-    """
-
-    def __init__(self, height: int = 768, width: int = 768):
-        self.out_height = height
-        self.out_width = width
-
-    def __call__(self, image: Tensor) -> Tensor:
-        """
-        Parameters
-        ----------
-        image:
-            The image to letterbox. The input must be shaped as [C, H, W].
-
-        Returns
-        -------
-        letterboxed_image:
-            The letterboxed image.
-        """
-        # Determine how much the image should be scaled up by
-        _, height, width = image.shape
-        height_ratio = self.out_height / height
-        width_ratio = self.out_width / width
-        scale = width_ratio if width_ratio < height_ratio else height_ratio
-
-        # Resize the image to the correct scale
-        new_height = int(scale * height)
-        new_width = int(scale * width)
-        resizer = v2.Resize((new_height, new_width))
-        image = resizer(image)
-
-        # Overlay on the output image size leaving padding
-        top = (self.out_height - new_height) // 2
-        bottom = top + new_height
-        left = (self.out_width - new_width) // 2
-        right = left + new_width
-        out_image = torch.ones((3, self.out_height, self.out_width)) * 127
-        out_image[:, top:bottom, left:right] = image
-
-        return out_image
-
-    def __repr__(self) -> str:
-        return (
-            f"{self.__class__.__name__}(height={self.out_height},"
-            f" width={self.out_width})"
-        )
-
-
 class OptionalDivision:
     """
     Divides the image's content by `255` if the max value in the image is greater than
@@ -83,11 +30,35 @@ class ViTImageTransform(v2.Compose):
         v2.Compose.__init__(
             self,
             [
-                Letterbox(height, width),
-                v2.RandomHorizontalFlip(p=0.5),
+                v2.Resize((height, width)),
                 v2.ToDtype(torch.float32, True),
                 OptionalDivision(),
-                # v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            ],
+        )
+
+
+class ViTTrainImageTransform(v2.Compose):
+    def __init__(self, height: int = 768, width: int = 768):
+
+        # v2.RandomChoice(
+        #     [
+        #         v2.GaussianNoise(mean=0, sigma=5e-2),
+        #         v2.RandomInvert(p=0.5),
+        #         v2.RandomGrayscale(p=0.5),
+        #         v2.RandomCrop((height // 10, width // 10)),
+        #     ]
+        # ),
+        v2.Compose.__init__(
+            self,
+            [
+                v2.Resize((height, width)),
+                v2.RandomHorizontalFlip(p=0.5),
+                v2.RandomVerticalFlip(p=0.5),
+                v2.RandomRotation(90),
+                v2.ToDtype(torch.float32, True),
+                OptionalDivision(),
+                v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
             ],
         )
 
@@ -120,7 +91,7 @@ class ViTDataset(Dataset, MetaLogger):
             The width of the image to pass to the network, in pixels.
         """
         MetaLogger.__init__(self)
-        self.transform = ViTImageTransform(image_height, image_width)
+        self.transform = ViTTrainImageTransform(image_height, image_width)
 
         self.images_path = images_path
         self.labels_path = labels_path
