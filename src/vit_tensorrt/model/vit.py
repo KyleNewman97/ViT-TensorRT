@@ -11,7 +11,7 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 from vit_tensorrt.config import TrainConfig, ViTConfig
-from vit_tensorrt.data import ViTDataset
+from vit_tensorrt.data import ViTDataset, ViTPredictImageTransform
 from vit_tensorrt.model.encoder import Encoder
 from vit_tensorrt.utils import MetaLogger
 
@@ -257,6 +257,51 @@ class ViT(nn.Module, MetaLogger):
 
         # Clean up at the end of training
         writer.close()
+
+    def _prepare_eval_data(self, data_path: Path) -> ViTDataset:
+        im_size = self.config.image_size
+        transform = ViTPredictImageTransform(im_size, im_size)
+        return ViTDataset(
+            data_path / "images",
+            data_path / "labels",
+            self.config.num_classes,
+            transform,
+        )
+
+    def evaluate(
+        self, data_path: Path
+    ) -> tuple[list[tuple[Path, Path]], list[tuple[Path, Path]]]:
+        dataset = self._prepare_eval_data(data_path)
+
+        image: torch.Tensor = None
+        label: torch.Tensor = None
+
+        correct, incorrect = [], []
+
+        # Inference loop
+        self.eval()
+        with torch.no_grad():
+            iterator = tqdm(dataset, ncols=88, desc="Evaluate")
+            for idx, (image, label) in enumerate(iterator):
+                # Run the image through the model
+                prediction: torch.Tensor = self(image.unsqueeze(0))
+
+                # Determine the predicted class
+                if 2 < self.config.num_classes:
+                    classifications = torch.nn.functional.softmax(prediction, dim=1)
+                    pred_class = classifications.argmax(dim=1)
+                    true_class: torch.Tensor = label.argmax(dim=1)
+                else:
+                    classifications = torch.nn.functional.sigmoid(prediction)
+                    pred_class = 0.5 < classifications
+                    true_class: torch.Tensor = label == 1
+
+                if pred_class != true_class:
+                    incorrect.append(dataset.samples[idx])
+                else:
+                    correct.append(dataset.samples[idx])
+
+        return correct, incorrect
 
     def save(self, file: Path):
         """

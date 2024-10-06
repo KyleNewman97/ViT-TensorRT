@@ -8,6 +8,7 @@ from torchvision.transforms.functional import pil_to_tensor
 
 from vit_tensorrt.utils import MetaLogger
 from vit_tensorrt.data.vit_train_image_transform import ViTTrainImageTransform
+from vit_tensorrt.data.vit_predict_image_transform import ViTPredictImageTransform
 
 
 class ViTDataset(Dataset, MetaLogger):
@@ -16,8 +17,9 @@ class ViTDataset(Dataset, MetaLogger):
         images_path: Path,
         labels_path: Path,
         num_classes: int,
-        image_height: int = 768,
-        image_width: int = 768,
+        transform: (
+            ViTTrainImageTransform | ViTPredictImageTransform
+        ) = ViTTrainImageTransform(),
     ):
         """
         Parameters
@@ -31,20 +33,15 @@ class ViTDataset(Dataset, MetaLogger):
         num_classes:
             The number of classes classification will be run on.
 
-        image_height:
-            The height of the image to pass to the network, in pixels.
-
-        image_width:
-            The width of the image to pass to the network, in pixels.
+        transform:
+            The transform that should be applied to the image prior to inference.
         """
         MetaLogger.__init__(self)
-        self.transform = ViTTrainImageTransform(image_height, image_width)
 
         self.images_path = images_path
         self.labels_path = labels_path
         self.num_classes = num_classes
-        self.image_height = image_height
-        self.image_width = image_width
+        self.transform = transform
 
         self.logger.info(f"Images path: {images_path}")
         self.logger.info(f"Labels path: {labels_path}")
@@ -57,7 +54,7 @@ class ViTDataset(Dataset, MetaLogger):
         self.samples = self._get_file_pairs(images, labels)
         self.samples = self._filter_for_valid_labels(self.samples)
 
-        self.logger.info(f"{len(self.samples)} valid image and label pairs exist.")
+        self.logger.info(f"{len(self.samples)} image and label pairs exist.")
 
     def _get_file_pairs(
         self, images: list[Path], labels: list[Path]

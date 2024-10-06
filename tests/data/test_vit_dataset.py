@@ -8,7 +8,7 @@ import numpy as np
 from PIL import Image
 from torch import Tensor
 
-from vit_tensorrt.data import ViTDataset
+from vit_tensorrt.data import ViTDataset, ViTTrainImageTransform
 
 
 class TestViTDataset:
@@ -90,10 +90,12 @@ class TestViTDataset:
 
         # Try to get a sample from the dataset
         num_classes = 2
-        dataset = ViTDataset(self.images_path, self.labels_path, num_classes, 768, 768)
+        height, width = 256, 512
+        transform = ViTTrainImageTransform(height, width)
+        dataset = ViTDataset(self.images_path, self.labels_path, num_classes, transform)
         image, label = dataset[0]
 
         assert isinstance(image, Tensor)
-        assert image.shape == (3, dataset.image_height, dataset.image_width)
+        assert image.shape == (3, height, width)
         assert isinstance(label, Tensor)
         assert label.shape == (1,)
