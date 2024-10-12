@@ -2,6 +2,7 @@ from pathlib import Path
 
 import torch
 import numpy as np
+import tensorrt as trt
 from torch import nn
 from torch.amp import autocast, GradScaler
 from torch.optim.lr_scheduler import ChainedScheduler, CosineAnnealingLR, LinearLR
@@ -78,19 +79,21 @@ class ViT(nn.Module, MetaLogger):
         """
 
         # Ensure the input image has the right shape
-        n, _, h, w = image_batch.shape
+        h, w = image_batch.size(2), image_batch.size(3)
         self._check_input_size(h, w)
 
         # Calculate the embeddings for each patch and ensure they form a sequence with
-        # shape (batch, sequence_length, patch_embedddings_size)
+        # shape (batch, sequence_length -1, patch_embedddings_size)
         embed_size = self.config.patch_embedding_size
+        seq_len = self.sequence_length - 1
         patch_embeddings: torch.Tensor = self.patcher(image_batch)
-        patch_embeddings = patch_embeddings.reshape(n, embed_size, -1).transpose(1, 2)
+        patch_embeddings = patch_embeddings.reshape(-1, embed_size, seq_len)
+        patch_embeddings = patch_embeddings.transpose(1, 2)
         patch_embeddings = patch_embeddings.contiguous()
 
         # Expand the class token so it can be concatenated to each embedding in the
         # batch
-        batch_class_token = torch.cat([self.class_token] * n, dim=0)
+        batch_class_token = self.class_token.expand(patch_embeddings.size(0), -1, -1)
         classed_patch_embeddings = torch.concat(
             [batch_class_token, patch_embeddings], dim=1
         )
@@ -327,7 +330,7 @@ class ViT(nn.Module, MetaLogger):
 
         return model
 
-    def to_onnx(self, file: Path | str, verbose: bool = False):
+    def to_onnx(self, file: Path | str, batch_size: int = 32, verbose: bool = False):
         """
         Converts the PyTorch model into an ONNX and saves it to the specified path.
 
@@ -335,6 +338,12 @@ class ViT(nn.Module, MetaLogger):
         ----------
         file:
             The path that the ONNX file will be saved to.
+
+        batch_size:
+            The maximum size of a batch the model will process.
+
+        verbose:
+            Whether to use verbose logging during ONNX export.
         """
         if "cuda" not in self.device:
             self.logger.warning(
@@ -345,7 +354,9 @@ class ViT(nn.Module, MetaLogger):
         # Define a dummy input for the model
         image_size = self.config.image_size
         dummy_input = torch.randn(
-            (32, 3, image_size, image_size), dtype=torch.float32, device=self.device
+            (batch_size, 3, image_size, image_size),
+            dtype=torch.float32,
+            device=self.device,
         )
 
         # Export the model to an ONNX file
@@ -364,3 +375,73 @@ class ViT(nn.Module, MetaLogger):
             verbose=verbose,
         )
         self.logger.info(f"Model exported to {file_str}.")
+
+    def to_tensorrt(self, file: Path | str, batch_size: int = 32):
+        """
+        Converts the PyTorch model into a TensorRT engine and saves it to the specified
+        path.
+
+        Parameters
+        ----------
+        file:
+            The path that the TensorRT engine will be saved to.
+
+        batch_size:
+            The maximum size of a batch the model will process.
+        """
+        # Convert the model to ONNX
+        onnx_file = file.with_suffix(".onnx")
+        self.to_onnx(onnx_file)
+
+        # Create TensorRT tools for converting ONNX to TensorRT
+        trt_logger = trt.Logger(trt.Logger.INFO)
+        builder = trt.Builder(trt_logger)
+        network = builder.create_network()
+        parser = trt.OnnxParser(network, trt_logger)
+
+        # Read in the ONNX model and try and parse it
+        with open(onnx_file, "rb") as fp:
+            onnx_data = fp.read()
+
+        if not parser.parse(onnx_data):
+            self.logger.error("Failed to parse the ONNX model.")
+            for error in range(parser.num_errors):
+                self.logger.error(parser.get_error(error))
+
+        # Display information about input and output shapes
+        inputs = [network.get_input(i) for i in range(network.num_inputs)]
+        outputs = [network.get_output(i) for i in range(network.num_outputs)]
+        for input in inputs:
+            self.logger.info(f"Model {input.name} shape: {input.shape} {input.dtype}")
+        for output in outputs:
+            self.logger.info(
+                f"Model {output.name} shape: {output.shape} {output.dtype}"
+            )
+
+        # Create TensorRT build config
+        config = builder.create_builder_config()
+        config.set_flag(trt.BuilderFlag.FP16)
+        config.set_flag(trt.BuilderFlag.STRIP_PLAN)
+        cache = config.create_timing_cache(b"")
+        config.set_timing_cache(cache, ignore_mismatch=False)
+
+        profile = builder.create_optimization_profile()
+        im_size = self.config.image_size
+        profile.set_shape(
+            "input",
+            (1, 3, im_size, im_size),
+            (32, 3, im_size, im_size),
+            (32, 3, im_size, im_size),
+        )
+        config.add_optimization_profile(profile)
+
+        serialized_engine = builder.build_serialized_network(network, config)
+
+        if serialized_engine is None:
+            self.logger.error("Failed to build the TensorRT engine.")
+            return
+
+        # Write the serialized engine to a file
+        with open(file, "wb") as fp:
+            fp.write(serialized_engine)
+        self.logger.info(f"Engine saved to {file}")
