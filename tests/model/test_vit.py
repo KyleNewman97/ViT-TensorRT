@@ -63,3 +63,13 @@ class TestViT:
         assert isinstance(loaded_model, ViT)
         assert loaded_model.config == model.config
         assert loaded_model.device == model.device
+
+    def test_to_onnx(self):
+        """
+        Test that we can convert to an ONNX file.
+        """
+        model = ViT(ViTConfig(), "cuda:0")
+
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            model.to_onnx(temp_path / "model.onnx")

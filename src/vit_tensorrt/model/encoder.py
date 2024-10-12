@@ -60,7 +60,7 @@ class Encoder(nn.Module, MetaLogger):
             raise RuntimeError(msg)
 
     def forward(self, patch_embeddings: torch.Tensor) -> torch.Tensor:
-        self._check_input(patch_embeddings)
+        # self._check_input(patch_embeddings)
 
         embeddings = patch_embeddings + self.position_embeddings
 
@@ -68,3 +68,11 @@ class Encoder(nn.Module, MetaLogger):
         embeddings = self.dropout(embeddings)
         output_embeddings = self.layers(embeddings)
         return self.norm_layer(output_embeddings)
+
+
+if __name__ == "__main__":
+    import torch
+
+    encoder = Encoder(257, 768, EncoderConfig(num_layers=8)).eval().cuda().float()
+    input = torch.randn(32, 257, 768).cuda().float()
+    torch.onnx.export(encoder, input, "encoder.onnx", export_params=True, verbose=True)

@@ -65,7 +65,10 @@ class EncoderBlock(nn.Module, MetaLogger):
         # embeddings in the sequence
         # It should be noted that the multi-head attention block applies the Q, K and V
         # projections despite requiring separate inputs for each
-        norm_embed = self.norm_layer_1(embeddings)
+        norm_embed: torch.Tensor = self.norm_layer_1(embeddings)
+        print(norm_embed.shape)
+        print(norm_embed.dtype)
+        print(norm_embed.is_contiguous())
         atten_embed, _ = self.self_attention.forward(
             norm_embed, norm_embed, norm_embed, need_weights=False
         )
@@ -80,3 +83,11 @@ class EncoderBlock(nn.Module, MetaLogger):
 
         # Apply a skip connection
         return mlp_output + atten_with_skip_embed
+
+
+if __name__ == "__main__":
+    import torch
+
+    block = EncoderBlock(768, 0.1, AttentionConfig(), MLPConfig()).eval().cuda().float()
+    input = torch.randn(32, 257, 768).cuda().float()
+    torch.onnx.export(block, input, "block.onnx", export_params=True, verbose=True)
