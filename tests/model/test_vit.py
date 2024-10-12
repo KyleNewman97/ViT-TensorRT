@@ -1,7 +1,5 @@
-import torch
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import MagicMock, patch
 
 from vit_tensorrt import ViT
 from vit_tensorrt.config import ViTConfig, EncoderConfig
