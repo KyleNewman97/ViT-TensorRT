@@ -43,6 +43,9 @@ class Encoder(nn.Module, MetaLogger):
         self.norm_layer = nn.LayerNorm(patch_embedding_size, eps=1e-6)
 
     def _check_input(self, x: torch.Tensor):
+        if torch.onnx.is_in_onnx_export():
+            return
+
         # Check the input has the correct number of dimensions
         if x.dim() != 3:
             msg = f"Expected a 3 dimensional input but got {x.dim()}."
@@ -60,7 +63,7 @@ class Encoder(nn.Module, MetaLogger):
             raise RuntimeError(msg)
 
     def forward(self, patch_embeddings: torch.Tensor) -> torch.Tensor:
-        # self._check_input(patch_embeddings)
+        self._check_input(patch_embeddings)
 
         embeddings = patch_embeddings + self.position_embeddings
 
@@ -68,11 +71,3 @@ class Encoder(nn.Module, MetaLogger):
         embeddings = self.dropout(embeddings)
         output_embeddings = self.layers(embeddings)
         return self.norm_layer(output_embeddings)
-
-
-if __name__ == "__main__":
-    import torch
-
-    encoder = Encoder(257, 768, EncoderConfig(num_layers=8)).eval().cuda().float()
-    input = torch.randn(32, 257, 768).cuda().float()
-    torch.onnx.export(encoder, input, "encoder.onnx", export_params=True, verbose=True)

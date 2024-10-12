@@ -44,6 +44,9 @@ class EncoderBlock(nn.Module, MetaLogger):
         self.mlp = MLPBlock(patch_embedding_size, dropout, mlp_config)
 
     def _check_input(self, x: torch.Tensor):
+        if torch.onnx.is_in_onnx_export():
+            return
+
         # Check the input has the correct number of dimensions
         if x.dim() != 3:
             msg = f"Expected a 3 dimensional input but got {x.dim()}."
@@ -60,15 +63,14 @@ class EncoderBlock(nn.Module, MetaLogger):
             raise RuntimeError(msg)
 
     def forward(self, embeddings: torch.Tensor) -> torch.Tensor:
+        self._check_input(embeddings)
+
         # Pass the embeddings through a multi-headed attention mechanism
         # This allows the network to determine relationships between the various
         # embeddings in the sequence
         # It should be noted that the multi-head attention block applies the Q, K and V
         # projections despite requiring separate inputs for each
         norm_embed: torch.Tensor = self.norm_layer_1(embeddings)
-        print(norm_embed.shape)
-        print(norm_embed.dtype)
-        print(norm_embed.is_contiguous())
         atten_embed, _ = self.self_attention.forward(
             norm_embed, norm_embed, norm_embed, need_weights=False
         )
@@ -83,11 +85,3 @@ class EncoderBlock(nn.Module, MetaLogger):
 
         # Apply a skip connection
         return mlp_output + atten_with_skip_embed
-
-
-if __name__ == "__main__":
-    import torch
-
-    block = EncoderBlock(768, 0.1, AttentionConfig(), MLPConfig()).eval().cuda().float()
-    input = torch.randn(32, 257, 768).cuda().float()
-    torch.onnx.export(block, input, "block.onnx", export_params=True, verbose=True)

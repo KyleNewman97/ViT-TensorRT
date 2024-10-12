@@ -17,16 +17,12 @@ from vit_tensorrt.utils import MetaLogger
 
 
 class ViT(nn.Module, MetaLogger):
-    def __init__(
-        self,
-        config: ViTConfig = ViTConfig(),
-        device: str = "cuda:0",
-    ):
+    def __init__(self, config: ViTConfig = ViTConfig()):
         nn.Module.__init__(self)
         MetaLogger.__init__(self)
 
         self.config = config
-        # self._set_compute_device(device)
+        self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
         # Convolves over the image extracting patches of size `patch_size * patch_size`.
         # This ensures the output embedding contains `patch_embedding_size` channels.
@@ -59,17 +55,17 @@ class ViT(nn.Module, MetaLogger):
         num_neurons = config.num_classes if config.num_classes > 2 else 1
         self.head = nn.Linear(config.patch_embedding_size, num_neurons)
 
-    def _set_compute_device(self, device: str):
-        if "cuda" in device and torch.cuda.is_available():
-            self.device = device
-        elif "cuda" in device and not torch.cuda.is_available():
-            self.logger.warning("CUDA device not found - running on CPU.")
-            self.device = "cpu"
-        else:
-            self.device = device
-        torch.set_default_device(self.device)
+        self.to(self.device)
 
-        self.logger.info(f"Set default device to {torch.get_default_device()}")
+    def _check_input_size(self, height: int, width: int):
+        if torch.onnx.is_in_onnx_export():
+            return
+
+        if height != self.config.image_size or width != self.config.image_size:
+            exp = self.config.image_size
+            msg = f"Expected (h, w) = ({exp}, {exp}) but got ({height}, {width})."
+            self.logger.error(msg)
+            raise RuntimeError(msg)
 
     def forward(self, image_batch: torch.Tensor) -> torch.Tensor:
         """
@@ -81,32 +77,26 @@ class ViT(nn.Module, MetaLogger):
             An input batch of images shaped as `(batch_size, channel, height, width)`.
         """
 
-        # # Ensure the input image has the right shape
-        # n, _, h, w = image_batch.shape
-        # if h != self.config.image_size or w != self.config.image_size:
-        #     expected = self.config.image_size
-        #     msg = f"Expected (h, w) = ({expected}, {expected}) but got ({h}, {w})."
-        #     self.logger.error(msg)
-        #     raise RuntimeError(msg)
+        # Ensure the input image has the right shape
+        n, _, h, w = image_batch.shape
+        self._check_input_size(h, w)
 
         # Calculate the embeddings for each patch and ensure they form a sequence with
         # shape (batch, sequence_length, patch_embedddings_size)
-        # embed_size = self.config.patch_embedding_size
-        # patch_embeddings: torch.Tensor = self.patcher(image_batch)
-        # patch_embeddings = patch_embeddings.reshape(n, embed_size, -1).transpose(1, 2)
-        # patch_embeddings = patch_embeddings.contiguous()
+        embed_size = self.config.patch_embedding_size
+        patch_embeddings: torch.Tensor = self.patcher(image_batch)
+        patch_embeddings = patch_embeddings.reshape(n, embed_size, -1).transpose(1, 2)
+        patch_embeddings = patch_embeddings.contiguous()
 
         # Expand the class token so it can be concatenated to each embedding in the
         # batch
-        # batch_class_token = torch.cat([self.class_token] * n, dim=0)
-        # classed_patch_embeddings = torch.concat(
-        #     [batch_class_token, patch_embeddings], dim=1
-        # )
+        batch_class_token = torch.cat([self.class_token] * n, dim=0)
+        classed_patch_embeddings = torch.concat(
+            [batch_class_token, patch_embeddings], dim=1
+        )
 
         # Pass through the encoder layers
-        encoder_output: torch.Tensor = self.encoder(image_batch)
-
-        return encoder_output
+        encoder_output: torch.Tensor = self.encoder(classed_patch_embeddings)
 
         # Extract the output "embedding" associated with the input "[class]" token
         out_class_embedding = encoder_output[:, 0, :]
@@ -317,7 +307,6 @@ class ViT(nn.Module, MetaLogger):
             {
                 "model": self.state_dict(),
                 "config": self.config.model_dump(),
-                "device": self.device,
             },
             file,
         )
@@ -330,16 +319,15 @@ class ViT(nn.Module, MetaLogger):
         # Load the previous state
         model_state = torch.load(file, weights_only=True)
         config = ViTConfig(**model_state["config"])
-        device = model_state["device"]
 
         # Initialise the model
-        model = cls(config, device)
+        model = cls(config)
         model.load_state_dict(model_state["model"])
         model.eval()
 
         return model
 
-    def to_onnx(self, file: Path):
+    def to_onnx(self, file: Path | str, verbose: bool = False):
         """
         Converts the PyTorch model into an ONNX and saves it to the specified path.
 
@@ -356,39 +344,23 @@ class ViT(nn.Module, MetaLogger):
 
         # Define a dummy input for the model
         image_size = self.config.image_size
-        dummy_input = torch.randn(1, 3, image_size, image_size)
-        dummy_input = dummy_input.cuda().float()
+        dummy_input = torch.randn(
+            (32, 3, image_size, image_size), dtype=torch.float32, device=self.device
+        )
 
         # Export the model to an ONNX file
-        model = self.eval().cuda().float()
-        model(dummy_input)
-
+        self.logger.info("Starting ONNX export...")
+        model = self.eval()
+        file_str = file.as_posix() if isinstance(file, Path) else file
         torch.onnx.export(
             model,
             dummy_input,
-            file.as_posix(),
+            file_str,
             export_params=True,
-            opset_version=13,
-            verbose=True,
-            do_constant_folding=False,
-            # input_names=["input"],
-            # output_names=["output"],
-            # dynamic_axes={"input": {0: "batch_size"}, "output": {0: "batch_size"}},
+            opset_version=18,
+            input_names=["input"],
+            output_names=["output"],
+            dynamic_axes={"input": {0: "batch_size"}, "output": {0: "batch_size"}},
+            verbose=verbose,
         )
-
-
-if __name__ == "__main__":
-    import torch
-    from vit_tensorrt.config import EncoderConfig
-
-    vit = (
-        ViT(ViTConfig(image_size=256, encoder_config=EncoderConfig(num_layers=8)))
-        .eval()
-        .cuda()
-        .float()
-    )
-    input = torch.randn(32, 257, 768).cuda().float()
-
-    torch.onnx.export(
-        vit, input, "vit.onnx", export_params=True, verbose=True, opset_version=18
-    )
+        self.logger.info(f"Model exported to {file_str}.")

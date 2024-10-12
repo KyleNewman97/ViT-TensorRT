@@ -4,55 +4,27 @@ from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, patch
 
 from vit_tensorrt import ViT
-from vit_tensorrt.config import ViTConfig
+from vit_tensorrt.config import ViTConfig, EncoderConfig
 
 
 class TestViT:
-    @patch("torch.cuda.is_available", lambda: True)
-    def test_init_gpu_available(self):
+    def test_init(self):
         """
-        Test that the default device is set correctly when CUDA is available and we want
-        to run on the first GPU.
+        Test that we can initialise the model correctly.
         """
-        # mock the call to set the device
-        torch.set_default_device = MagicMock()
 
-        device = "cuda:0"
-        ViT(ViTConfig(), device)
+        config = ViTConfig()
+        model = ViT(config)
 
-        torch.set_default_device.assert_called_once_with(device)
-
-    @patch("torch.cuda.is_available", lambda: False)
-    def test_init_gpu_unavailable(self):
-        """
-        Test that the default device is set correctly when CUDA is unavailable and we
-        want  to run on the first GPU.
-        """
-        # mock the call to set the device
-        torch.set_default_device = MagicMock()
-
-        ViT(ViTConfig(), "cuda:0")
-
-        torch.set_default_device.assert_called_once_with("cpu")
-
-    def test_init_cpu(self):
-        """
-        Test that the default device is set correctly when we want to run on the CPU.
-        """
-        # mock the call to set the device
-        torch.set_default_device = MagicMock()
-
-        device = "cpu"
-        ViT(ViTConfig(), device)
-
-        torch.set_default_device.assert_called_once_with(device)
+        assert isinstance(model, ViT)
 
     def test_save_and_load(self):
         """
         Test that we can save and load the model.
         """
-
-        model = ViT(ViTConfig(), "cpu")
+        encoder_config = EncoderConfig(num_layers=4)
+        config = ViTConfig(image_size=256, encoder_config=encoder_config)
+        model = ViT(config)
 
         with TemporaryDirectory() as temp_dir:
             model_file = Path(temp_dir) / "model.pt"
@@ -68,8 +40,13 @@ class TestViT:
         """
         Test that we can convert to an ONNX file.
         """
-        model = ViT(ViTConfig(), "cuda:0")
+        encoder_config = EncoderConfig(num_layers=4)
+        config = ViTConfig(image_size=256, encoder_config=encoder_config)
+        model = ViT(config)
 
         with TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
-            model.to_onnx(temp_path / "model.onnx")
+            file = temp_path / "model.onnx"
+            model.to_onnx(file)
+
+            assert file.is_file()

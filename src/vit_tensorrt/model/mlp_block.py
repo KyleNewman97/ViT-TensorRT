@@ -26,11 +26,3 @@ class MLPBlock(nn.Sequential):
                 nn.init.xavier_uniform_(m.weight)
                 if m.bias is not None:
                     nn.init.normal_(m.bias, std=1e-6)
-
-
-if __name__ == "__main__":
-    import torch
-
-    mlp = MLPBlock(768, 0.1, MLPConfig()).cuda().float()
-    input = torch.randn(1, 768).cuda().float()
-    torch.onnx.export(mlp, input, "mlp.onnx", verbose=True)
