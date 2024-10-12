@@ -16,7 +16,7 @@ class TrainConfig(BaseModel):
     )
     epochs: int = Field(default=100)
     batch_size: int = Field(default=16)
-    learning_rate: float = Field(default=1e-3)
+    learning_rate: float = Field(default=1e-4)
 
     @property
     def log_dir(self) -> Path:

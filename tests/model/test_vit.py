@@ -45,6 +45,6 @@ class TestViT:
         with TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             file = temp_path / "model.onnx"
-            model.to_onnx(file)
+            model.export_onnx(file)
 
             assert file.is_file()

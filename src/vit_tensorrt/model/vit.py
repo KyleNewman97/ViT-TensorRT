@@ -330,7 +330,9 @@ class ViT(nn.Module, MetaLogger):
 
         return model
 
-    def to_onnx(self, file: Path | str, batch_size: int = 32, verbose: bool = False):
+    def export_onnx(
+        self, file: Path | str, batch_size: int = 32, verbose: bool = False
+    ):
         """
         Converts the PyTorch model into an ONNX and saves it to the specified path.
 
@@ -376,7 +378,7 @@ class ViT(nn.Module, MetaLogger):
         )
         self.logger.info(f"Model exported to {file_str}.")
 
-    def to_tensorrt(self, file: Path | str, batch_size: int = 32):
+    def export_tensorrt(self, file: Path | str, batch_size: int = 32):
         """
         Converts the PyTorch model into a TensorRT engine and saves it to the specified
         path.
@@ -391,7 +393,7 @@ class ViT(nn.Module, MetaLogger):
         """
         # Convert the model to ONNX
         onnx_file = file.with_suffix(".onnx")
-        self.to_onnx(onnx_file)
+        self.export_onnx(onnx_file, batch_size)
 
         # Create TensorRT tools for converting ONNX to TensorRT
         trt_logger = trt.Logger(trt.Logger.INFO)
@@ -430,8 +432,8 @@ class ViT(nn.Module, MetaLogger):
         profile.set_shape(
             "input",
             (1, 3, im_size, im_size),
-            (32, 3, im_size, im_size),
-            (32, 3, im_size, im_size),
+            (batch_size, 3, im_size, im_size),
+            (batch_size, 3, im_size, im_size),
         )
         config.add_optimization_profile(profile)
 
