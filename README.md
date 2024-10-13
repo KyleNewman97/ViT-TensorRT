@@ -7,6 +7,8 @@ A re-implementation of the original Vision Transformer (ViT) model in PyTorch. T
 repository also makes it easy to productionize the model with ONNX and TensorRT export.
 
 ## Installation
+[![PyPI - Version](https://img.shields.io/pypi/v/ViT-TensorRT?logo=pypi&logoColor=white)](https://pypi.org/project/ViT-TensorRT/) [![PyPI - Python Version](https://img.shields.io/badge/python-3.11%20-blue.svg)](https://www.python.org/downloads/release/python-3110/)
+
 ViT-TensorRT requires your system to have a NVIDIA GPU with CUDA installed. CUDA `12.4`
 has been tested with this repository.
 
