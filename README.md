@@ -1,3 +1,7 @@
+<div style="display: flex; margin-bottom: 30px;">
+    <img src="https://github.com/user-attachments/assets/91dd3e41-2df9-4a9a-afe3-fb3468e81235" style="width: 100%; max-width: 800px; margin: 0 auto;"/>
+</div>
+
 # ViT-TensorRT
 A re-implementation of the original Vision Transformer (ViT) model in PyTorch. This
 repository also makes it easy to productionize the model with ONNX and TensorRT export.
